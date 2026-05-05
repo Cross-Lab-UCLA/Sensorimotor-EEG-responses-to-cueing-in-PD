@@ -5,12 +5,14 @@
 % LM 122325
 %%
 clear all; clc; close all
+rng(134);
 if ispc
-    mainDir     = 'C:\Git\DoD-Gait';
+    mainDir     = 'E:\clab\DoD-Gait';
 else
     mainDir = '/Users/Leo/Git/DOD-Gait';
 end
-addpath(genpath(fullfile(mainDir,'code')));
+addpath(fullfile(mainDir,'code'));
+addpath(fullfile(mainDir,'code','func'));
 eeglab;
 ft_defaults; close all;
 
@@ -89,9 +91,8 @@ end
 %     'alpha', 0.05,...
 %     'mcorrect','cluster');
 
-lsm_mask = nan(size(pvals));
-lsm_mask(pvals >= 0.05) = 0;
-lsm_mask(pvals < 0.05) = 1;
+[lsm_t_values, lsm_mask] = apply_significance_mask(pvals, stats);
+
 
 [stats,df,pvals]= statcondfieldtrip({rsm_ersp_selfBase_pChange_mean; zeros(size(rsm_ersp_selfBase_pChange_mean))},...
     'paired','on',...
@@ -107,19 +108,17 @@ lsm_mask(pvals < 0.05) = 1;
 %     'alpha', 0.05,...
 %     'mcorrect','cluster');
 
-rsm_mask = nan(size(pvals));
-rsm_mask(pvals >= 0.05) = 0;
-rsm_mask(pvals < 0.05) = 1;
+[rsm_t_values, rsm_mask] = apply_significance_mask(pvals, stats);
 
 saveName = fullfile(mainDir,'data',"study_p-masks.mat");
 save(saveName,"rsm_mask","lsm_mask");
 
 %% plot
 % set parameters
-colorRSM1 = {[1 .23 .1] * 0.9};
-colorRSM2 = {[.9 .43 .3]};
-colorLSM1 = {[.1 .62 1] * 0.9};
-colorLSM2 = {[.3 .82 .9]};
+colorRSM1 = {[0.90, 0.60, 0.00] * 0.9};
+colorRSM2 = {[0.90, 0.60, 0.00]};
+colorLSM1 = {[0.35, 0.70, 0.90] * 0.9};
+colorLSM2 = {[0.35, 0.70, 0.90]};
 
 % make plot
 f1 = figure('units','normalized','outerposition',[0 0 1 1]);
@@ -215,6 +214,47 @@ saveas(gcf,fullfile(figFolder,filename));
 filename = 'ERSP_averaged_ALL_percent.fig';
 saveas(gcf,fullfile(figFolder,filename));
 %close all
+
+%% extract
+
+% check pos and neg clusters for LSM
+lsm_t_pos = lsm_t_values;
+lsm_t_pos(lsm_t_values <= 0) = nan;
+lsm_t_neg = lsm_t_values;
+lsm_t_neg(lsm_t_values >= 0) = nan;,
+lsm_sum_pos = sum(lsm_t_pos, 'all', 'omitnan');
+lsm_sum_neg = sum(lsm_t_neg, 'all', 'omitnan');
+
+figure
+t2 = tiledlayout(2,2,'TileSpacing','Compact');
+
+nexttile;
+contourf(tfdata(1).times./1000, tfdata(1).freqs, lsm_t_pos, 40, 'linecolor', 'none'); 
+colormap(gca, 'hot');
+title(sprintf('LSM Positive Clusters (\\SigmaT = %.2f)', lsm_sum_pos));
+nexttile;
+contourf(tfdata(1).times./1000, tfdata(1).freqs, lsm_t_neg, 40, 'linecolor', 'none'); 
+colormap(gca, 'abyss');
+title(sprintf('LSM Negative Clusters (\\SigmaT = %.2f)', lsm_sum_neg));
+
+% check pos and neg clusters for LSM
+rsm_t_pos = rsm_t_values;
+rsm_t_pos(rsm_t_values <= 0) = nan;
+rsm_t_neg = rsm_t_values;
+rsm_t_neg(rsm_t_values >= 0) = nan;,
+rsm_sum_pos = sum(rsm_t_pos, 'all', 'omitnan');
+rsm_sum_neg = sum(rsm_t_neg, 'all', 'omitnan');
+
+nexttile;
+contourf(tfdata(1).times./1000, tfdata(1).freqs, rsm_t_pos, 40, 'linecolor', 'none'); 
+colormap(gca, 'hot');
+title(sprintf('RSM Positive Clusters (\\SigmaT = %.2f)', rsm_sum_pos));
+nexttile;
+contourf(tfdata(1).times./1000, tfdata(1).freqs, rsm_t_neg, 40, 'linecolor', 'none'); 
+colormap(gca, 'abyss');
+title(sprintf('RSM Negative Clusters (\\SigmaT = %.2f)', rsm_sum_neg));
+
+
 
 %% functions
 function addSwingAnnotation(ax, t1, t2, label)

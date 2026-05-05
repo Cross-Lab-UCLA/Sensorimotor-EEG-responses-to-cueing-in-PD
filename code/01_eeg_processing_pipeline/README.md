@@ -17,7 +17,7 @@
 Notes:
 - scripts are written for the PD gait cueing study
 - run the scripts in the following order
-- some scripts requires functions from  \code\func
+- some scripts requires functions from  \code\01_eeg_processing_pipeline\func
 
 ### Step 1. A1_Merge_Sets_withStanding_run1only
 	- prompt and load subject data from subject-->raw
