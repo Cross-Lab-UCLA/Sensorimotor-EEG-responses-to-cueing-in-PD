@@ -1,30 +1,31 @@
-%% Targeted Clustering and ERSP Normalization
+%% Targeted Clustering and ERSP Selection
 %
 % This script performs a targeted clustering approach to identify Independent Components (ICs)
-% from EEG dipole fitting results that are closest to predefined Regions of
-% Interest (ROIs). Targets: Left and Right Sensorimotor areas
+% from EEG dipole fitting results that fall within predefined ROI. Targets: Left and Right Sensorimotor areas
 %
-%   1. Loads subject ERSP data from a specified folder (e.g., '06_ERSP_subjects_*').
-%   2. Identifies IC dipoles nearest to ROIs defined by MNI coordinates for Left and Right Sensorimotor areas.
-%   3. Resolves overlapping ICs found in both ROIs by keeping the closest one.
-%   4. Normalizes ERSP data of selected ICs with respect to baseline and across experimental conditions.
-%   5. Saves normalized ERSP data and clustering information for each subject.
+%   1. Loads subject ERSP data (already baseline-normalized in A6) from a specified folder (e.g., '06_ERSP_*').
+%   2. Includes ICs whose centrotype dipole falls inside the Left/Right sensorimotor ROI ellipsoid (MNI).
+%   3. Removes ICs whose scalp topography is a group-level outlier (|r| < 0.3 to a subject-balanced group reference map).
+%   4. When more than one IC remains in an ROI for a subject, selects the one with the strongest
+%      contra-specific (contralateral minus ipsilateral swing) beta suppression.
+%   5. Saves the selected IC's ERSP per subject with its dipole and subject info.
 %   6. Outputs a summary table of selected ICs and their distances from ROIs.
 %
-% LM 122325
+%
+% LM 071426
 %%
 clear all;
 if ispc
-    mainDir     = 'C:\Git\DoD-Gait';
+    mainDir    = 'C:\clab\DoD-Gait';
 elseif ismac
-    mainDir = '/Users/Leo/Git/DoD-Gait';
+    mainDir    = '/Users/Leo/Git/DoD-Gait';
 else
     mainDir    = '/home/leo/Documents/DoD-Gait';
 end
 
 % load in libraries
-funcpath   = fullfile(mainDir,'code','func');
-addpath(funcpath)
+funcPath    = fullfile(mainDir,'code','01_eeg_processing_pipeline','func');
+addpath(funcPath)
 eeglab; ft_defaults; clc; close all
 
 % set up paths
@@ -33,22 +34,24 @@ figDir      = fullfile(mainDir,'reports','data_quality');
 
 % prompt user for folder
 disp('Load in 06_ERSP folder.')
-% dataDir2     = 'C:\clab\DoD-Gait\data';
-path = uigetdir(dataDir,'Load in 06_ERSP folder.');
-label = extractAfter(path,'06_ERSP_');
-saveDir     = fullfile(mainDir,'data',['07_selected_' label]);
-if ~exist(saveDir, 'dir')
-    mkdir(saveDir)
+workingDir = uigetdir(dataDir,'Load in 06_ERSP folder.');
+
+[~, folderName] = fileparts(workingDir);
+label       = extractAfter(workingDir,'ERSP_');
+saveFolder = fullfile(mainDir, 'data', ['07_selected', repmat(['_' label], 1, ~isempty(label))]);
+
+if ~exist(saveFolder, 'dir')
+    mkdir(saveFolder)
 else
     prompt = "Delete previous folder? Y/N [N]: ";
     txt = input(prompt,"s");
     if strcmpi(txt,'Y')
-        rmdir(saveDir, 's'); % Delete the folder
+        rmdir(saveFolder, 's'); % Delete the folder
         disp('Overwrite previous folder');
-        mkdir(saveDir)
+        mkdir(saveFolder)
     end
 end
-subFiles = dir(fullfile(path,'sub*'));
+subFiles = dir(fullfile(workingDir,'sub*'));
 
 % load demo data
 T_demo = readtable(fullfile(dataDir,"demo_data_analysis.xlsx"));
@@ -58,11 +61,20 @@ LSM_roi = [-30 -20 58];
 RSM_roi = [30 -20 58];
 thres = 30; % radius threshold for cluster
 
+roiInclusion = 'centroid';  % which dipole point must fall inside the ROI ellipsoid:
+                            %   'centroid' = centrotype point only
+                            %   'median'   = per-run cloud median only (ignores centrotype)
+                            %   'either'   = centrotype OR cloud median
+roiInclusion = validatestring(roiInclusion, {'centroid','median','either'});
+roiInside = @(inCentro,inMedian) (strcmp(roiInclusion,'centroid') && inCentro) || ...
+                                 (strcmp(roiInclusion,'median')   && inMedian) || ...
+                                 (strcmp(roiInclusion,'either')   && (inCentro || inMedian));
+
 % experimental ellipsoid
 radii_thres = [30, 25, 30];  % elongated medial-laterally instead of a sphere
 ellipsoidMat = diag(radii_thres .^ 2);  % 3x3 matrix for the ellipsoid
 
-selectedFigDir = fullfile(figDir,['selected_ersp_' label]);
+selectedFigDir = fullfile(figDir,'A7_selected_ersp');
 if ~exist(selectedFigDir, 'dir')
     mkdir(selectedFigDir)
 end
@@ -79,15 +91,14 @@ for sub = 1:length(subFiles)
     load(fullfile(subFiles(sub).folder,subFiles(sub).name));
     disp('Checking dipole... ')
 
-    % update dipfit corrd and rv if there is bootstrapped data
-    if isfield(dipfit,'boot')
-        disp('bootstrap dipfit detected...using bootrapped data.')
+    % update dipfit coord and rv if there is cluster dipfit data
+    if isfield(dipfit,'cltr')
+        disp('cluster dipfit detected...using cluster data.')
         for i = 1:length(dipfit.model)
-            dipfit.model(i).posxyz = dipfit.boot(i).posxyz;
-            dipfit.model(i).momxyz = dipfit.boot(i).momxyz;
-            dipfit.model(i).rv = dipfit.boot(i).rv;
-            icawinv = cat(2,dipfit.boot(:).icawinv);
+            dipfit.model(i).posxyz = dipfit.cltr(i).posxyz;
+            dipfit.model(i).rv = dipfit.cltr(i).rv;
         end
+        icawinv = cat(2,dipfit.cltr(:).icawinv);
     end
 
     % Make sure channel order are consistent
@@ -112,11 +123,44 @@ for sub = 1:length(subFiles)
     % dist_list_RSM = pdist2(xyz,RSM_roi);
     % min_idx_list_RSM = find(dist_list_RSM < thres);
 
-    %%% find distance to LSM and RSM using ellipsoid %%%
+    %%% repersentiveIC-to-ROI vector (kept for distance reporting) %%%
     dist_list_LSM       = xyz - LSM_roi;
-    min_idx_list_LSM    = find(sum((dist_list_LSM / ellipsoidMat) .* dist_list_LSM, 2) <= 1); % find the dipoles within ellipsoid
     dist_list_RSM       = xyz - RSM_roi;
-    min_idx_list_RSM    = find(sum((dist_list_RSM / ellipsoidMat) .* dist_list_RSM, 2) <= 1); % find the dipoles within ellipsoid
+
+    %%% point-based ROI overlap: include an IC when the point(s) selected %%%
+    % by roiInclusion (centrotype and/or per-run cloud median) fall inside
+    % the ROI ellipsoid.
+    includeInLSM  = false(length(dipfit.model),1);
+    includeInRSM  = false(length(dipfit.model),1);
+    median_xyz    = nan(length(dipfit.model),3);        % median of the per-run cloud, per IC
+    for c = 1:length(dipfit.model)
+        if isfield(dipfit,'cltr') && ~isempty(dipfit.cltr(c).pos_runs)
+            all_runs = dipfit.cltr(c).pos_runs;            % [nRun x 3] per-run dipole cloud
+        else
+            all_runs = xyz(c,:);                           % fallback: centrotype point
+        end
+        all_runs = all_runs(all(~isnan(all_runs),2),:);          % drop runs without this IC
+
+        repXYZ   = xyz(c,:);                     % centrotype point
+        medianXYZ       = median(all_runs, 1);             % median of the per-run cloud
+        median_xyz(c,:) = medianXYZ;
+
+        % inside-ellipsoid test for the two representative points; which
+        % point(s) count toward inclusion is set by roiInclusion above
+        centrotypeOffsetLSM = repXYZ - LSM_roi;
+        medianOffsetLSM     = medianXYZ - LSM_roi;
+        inLSM_centro = sum((centrotypeOffsetLSM / ellipsoidMat) .* centrotypeOffsetLSM) <= 1;
+        inLSM_median = sum((medianOffsetLSM / ellipsoidMat) .* medianOffsetLSM) <= 1;
+        includeInLSM(c) = roiInside(inLSM_centro, inLSM_median);
+
+        centrotypeOffsetRSM = repXYZ - RSM_roi;
+        medianOffsetRSM     = medianXYZ - RSM_roi;
+        inRSM_centro = sum((centrotypeOffsetRSM / ellipsoidMat) .* centrotypeOffsetRSM) <= 1;
+        inRSM_median = sum((medianOffsetRSM / ellipsoidMat) .* medianOffsetRSM) <= 1;
+        includeInRSM(c) = roiInside(inRSM_centro, inRSM_median);
+    end
+    min_idx_list_LSM    = find(includeInLSM); % centrotype (and optionally median) inside the ROI
+    min_idx_list_RSM    = find(includeInRSM);
 
     % find if there are shared IC and remove it from the cluster with the
     % furthest dist
@@ -130,7 +174,7 @@ for sub = 1:length(subFiles)
 
     subjectRows = {};
     for i = 1:length(min_idx_list_LSM)
-        subjectRows(end+1, :) = {subject, 'LSM', min_idx_list_LSM(i), dist_list_LSM(min_idx_list_LSM(i)), xyz(min_idx_list_LSM(i),:)};
+        subjectRows(end+1, :) = {subject, 'LSM', min_idx_list_LSM(i), norm(dist_list_LSM(min_idx_list_LSM(i),:)), norm(median_xyz(min_idx_list_LSM(i),:) - LSM_roi), xyz(min_idx_list_LSM(i),:), median_xyz(min_idx_list_LSM(i),:)};
 
         counter = length(LSM) + 1;
 
@@ -141,27 +185,27 @@ for sub = 1:length(subFiles)
         LSM(counter).times          = times;
         LSM(counter).freqs          = freqs;
         LSM(counter).warpVals       = warpVals;
-        LSM(counter).dist_from_roi  = dist_list_LSM(min_idx_list_LSM(i));
+        LSM(counter).dist_from_roi  = norm(dist_list_LSM(min_idx_list_LSM(i),:));
         % extract ersp
         tmp = tfdata(min_idx_list_LSM(i)).ersp_selfBase_pChange_mean;
         tmpCat = cat(3, tmp{:});
         LSM(counter).ersp_selfBase_pChange_mean = mean(tmpCat, 3, "omitmissing");
 
-        LSM_dip(counter).posxyz     =  dipfit.model(min_idx_list_LSM(i)).posxyz;
+        LSM_dip(counter).posxyz     =  dipfit.model(min_idx_list_LSM(i)).posxyz; % for plotting
         LSM_dip(counter).momxyz     =  dipfit.model(min_idx_list_LSM(i)).momxyz;
         LSM_dip(counter).rv         =  dipfit.model(min_idx_list_LSM(i)).rv;
 
     end
 
     for i = 1:length(min_idx_list_RSM)
-        subjectRows(end+1, :) = {subject , 'RSM', min_idx_list_RSM(i), dist_list_RSM(min_idx_list_RSM(i)), xyz(min_idx_list_RSM(i),:)};
+        subjectRows(end+1, :) = {subject , 'RSM', min_idx_list_RSM(i), norm(dist_list_RSM(min_idx_list_RSM(i),:)), norm(median_xyz(min_idx_list_RSM(i),:) - RSM_roi), xyz(min_idx_list_RSM(i),:), median_xyz(min_idx_list_RSM(i),:)};
 
         counter = length(RSM) + 1;
         RSM(counter).subject = subject;
         RSM(counter).index = min_idx_list_RSM(i);
         RSM(counter).icawinv = icawinv(:,min_idx_list_RSM(i));
         RSM(counter).chanlocs = chanlocs;
-        RSM(counter).dist_from_roi  = dist_list_RSM(min_idx_list_RSM(i));
+        RSM(counter).dist_from_roi  = norm(dist_list_RSM(min_idx_list_RSM(i),:));
         RSM(counter).times          = times;
         RSM(counter).freqs          = freqs;
         RSM(counter).warpVals       = warpVals;
@@ -179,21 +223,64 @@ for sub = 1:length(subFiles)
 
 end
 allRows = vertcat(allSubjectsSelectedDipole{:});
-finalTable = cell2table(allRows, 'VariableNames', {'Subject', 'Cluster', 'DipoleIndex', 'DistanceFromROI', 'XYZ'});
+finalTable = cell2table(allRows, 'VariableNames', {'Subject', 'Cluster', 'DipoleIndex', 'DistanceFromROI', 'ClusterMedianDistanceFromROI', 'CentrotypeXYZ', 'MedianXYZ'});
 LSM_rows = finalTable(finalTable.Cluster == "LSM", :);
 RSM_rows = finalTable(finalTable.Cluster == "RSM", :);
 
 %% filter by scalp projection
-r_thres = 0.3; % dipoles with r value below this is removed
+r_thres = 0.3;
 nBoot = [];
 
-[LSM_group_map LSM_topo_corr,LSM_icawinv_norm] = getTopoCorr(LSM,nBoot);
-LSM_outliers = LSM_topo_corr < r_thres;
-LSM_outliers_idx = find(LSM_outliers);
+[LSM_group_map, LSM_topo_corr, LSM_icawinv_norm, LSM_topo_subject] = getTopoCorr(LSM,nBoot,false);
+[RSM_group_map, RSM_topo_corr, RSM_icawinv_norm, RSM_topo_subject] = getTopoCorr(RSM,nBoot,false);
 
-[RSM_group_map RSM_topo_corr,RSM_icawinv_norm] = getTopoCorr(RSM,nBoot);
-RSM_outliers = RSM_topo_corr < r_thres;
+% inspect dist of the r values
+f0 = figure('Name','A7 topo r distribution','Color','w');
+tiledlayout(1,2,'TileSpacing','compact','Padding','compact');
+nexttile; histogram(LSM_topo_corr,20); hold on; 
+xline(-1*r_thres,'r','LineWidth',1.5);
+xline(r_thres,'r','LineWidth',1.5);
+title(sprintf('LSM (thr=%.3f)',r_thres)); 
+xlabel('topo r'); 
+ylabel('count');
+nexttile; histogram(RSM_topo_corr,20); hold on; 
+xline(-1*r_thres,'r','LineWidth',1.5);
+xline(r_thres,'r','LineWidth',1.5);
+title(sprintf('RSM (thr=%.3f)',r_thres)); 
+xlabel('topo r');
+exportgraphics(f0, fullfile(figDir,'A7_topo_r_distribution.png'), 'Resolution', 300);
+
+% quality check: for each ROI show the scalp map whose |topo r| lands closest
+% to r = 0.1, 0.2, ... 0.9
+r_targets = 0.1:0.1:0.9;
+f_qc = figure('units','normalized','outerposition',[0 0 1 1]);
+tiledlayout(2,numel(r_targets),'TileSpacing','compact','Padding','compact');
+for t = 1:numel(r_targets)
+    [~, idx] = min(abs(LSM_topo_corr - r_targets(t)));
+    nexttile(t);
+    topoplot(LSM_icawinv_norm(:,idx), LSM(idx).chanlocs);
+    title(sprintf('LSM ~%.1f (r=%.2f)', r_targets(t), LSM_topo_corr(idx)));
+end
+for t = 1:numel(r_targets)
+    [~, idx] = min(abs(RSM_topo_corr - r_targets(t)));
+    nexttile(numel(r_targets)+t);
+    topoplot(RSM_icawinv_norm(:,idx), RSM(idx).chanlocs);
+    title(sprintf('RSM ~%.1f (r=%.2f)', r_targets(t), RSM_topo_corr(idx)));
+end
+sgtitle('Topo map by correlation level','FontSize',24);
+set(gcf,'Color','w');
+exportgraphics(f_qc, fullfile(figDir,'A7_topo_r_levels.png'), 'Resolution', 300);
+close all
+
+LSM_outliers = abs(LSM_topo_corr) < r_thres;
+LSM_outliers_idx = find(LSM_outliers);
+disp('LSM topo outliers (subject, r):')
+disp([LSM_topo_subject(LSM_outliers_idx)', num2cell(LSM_topo_corr(LSM_outliers_idx)')])
+
+RSM_outliers = abs(RSM_topo_corr) < r_thres;
 RSM_outliers_idx = find(RSM_outliers);
+disp('RSM topo outliers (subject, r):')
+disp([RSM_topo_subject(RSM_outliers_idx)', num2cell(RSM_topo_corr(RSM_outliers_idx)')])
 
 % LSM plot outliers
 f1 = figure('units','normalized','outerposition',[0 0 1 1]);
@@ -234,7 +321,7 @@ LSM_plot_idx = find(ismember({LSM.subject},{'sub-HC15','sub-HC17','sub-PD12','su
 RSM_plot_idx = find(ismember({RSM.subject},{'sub-HC15','sub-HC17','sub-PD12','sub-PD23','sub-PD31'}));
 
 % LSM
-centroid1 = LSM_group_map;
+centroid1 = median(LSM_icawinv_norm, 2);
 centroid2 = median(LSM_icawinv_norm(:, LSM_outliers), 2);
 centroid3 = median(LSM_icawinv_norm(:, ~LSM_outliers), 2);
 all_vals1 = [centroid1(:); centroid2(:); centroid3(:)];
@@ -265,9 +352,9 @@ cb1.Layout.Tile = 4;
 cb1.Label.String = 'LSM Scalp Map';
 
 % RSM
-centroid1 = RSM_group_map;
-centroid2 = mean(RSM_icawinv_norm(:, RSM_outliers), 2);
-centroid3 = mean(RSM_icawinv_norm(:, ~RSM_outliers), 2);
+centroid1 = median(RSM_icawinv_norm, 2);
+centroid2 = median(RSM_icawinv_norm(:, RSM_outliers), 2);
+centroid3 = median(RSM_icawinv_norm(:, ~RSM_outliers), 2);
 all_vals2 = [centroid1(:); centroid2(:); centroid3(:)];
 clim2 = [min(all_vals2), max(all_vals2)];
 
@@ -324,7 +411,7 @@ set(gca, 'ydir', 'normal'); ylabel('Frequencies (Hz)','FontSize',18);
 xlim([0 warpVals(end)]); xticks(warpVals);
 xline(warpVals([1,3,5]),'LineWidth',2,'alpha',1);
 xline(warpVals([2,4]),'LineWidth',2,'alpha',1);
-ylim([4 50]); yticks(freqs(find(ismember(freqs, [4 8 13 30 50]))))
+ylim([4 50]); yticks(f(find(ismember(f, [4 8 13 30 50]))))
 xticklabels({'RHS','LTO','LHS','RTO','RHS'});xtickangle(30);
 xlabel('Gait Cycle')
 yline(13,'--k',LineWidth=2)
@@ -337,7 +424,7 @@ set(gca, 'ydir', 'normal'); ylabel('Frequencies (Hz)','FontSize',18);
 xlim([0 warpVals(end)]); xticks(warpVals);
 xline(warpVals([1,3,5]),'LineWidth',2,'alpha',1);
 xline(warpVals([2,4]),'LineWidth',2,'alpha',1);
-ylim([4 50]); yticks(freqs(find(ismember(freqs, [4 8 13 30 55]))))
+ylim([4 50]); yticks(f(find(ismember(f, [4 8 13 30 50]))))
 xticklabels({'RHS','LTO','LHS','RTO','RHS'});xtickangle(30);
 xlabel('Gait Cycle')
 yline(13,'--k',LineWidth=2)
@@ -350,7 +437,7 @@ set(gca, 'ydir', 'normal'); ylabel('Frequencies (Hz)','FontSize',18);
 xlim([0 warpVals(end)]); xticks(warpVals);
 xline(warpVals([1,3,5]),'LineWidth',2,'alpha',1);
 xline(warpVals([2,4]),'LineWidth',2,'alpha',1);
-ylim([4 50]); yticks(freqs(find(ismember(freqs, [4 8 13 30 55]))))
+ylim([4 50]); yticks(f(find(ismember(f, [4 8 13 30 50]))))
 xticklabels({'RHS','LTO','LHS','RTO','RHS'});xtickangle(30);
 xlabel('Gait Cycle')
 yline(13,'--k',LineWidth=2)
@@ -378,7 +465,7 @@ set(gca, 'ydir', 'normal'); ylabel('Frequencies (Hz)','FontSize',18);
 xlim([0 warpVals(end)]); xticks(warpVals);
 xline(warpVals([1,3,5]),'LineWidth',2,'alpha',1);
 xline(warpVals([2,4]),'LineWidth',2,'alpha',1);
-ylim([4 50]); yticks(freqs(find(ismember(freqs, [4 8 13 30 55]))))
+ylim([4 50]); yticks(f(find(ismember(f, [4 8 13 30 50]))))
 xticklabels({'RHS','LTO','LHS','RTO','RHS'});xtickangle(30);
 xlabel('Gait Cycle')
 yline(13,'--k',LineWidth=2)
@@ -391,7 +478,7 @@ set(gca, 'ydir', 'normal'); ylabel('Frequencies (Hz)','FontSize',18);
 xlim([0 warpVals(end)]); xticks(warpVals);
 xline(warpVals([1,3,5]),'LineWidth',2,'alpha',1);
 xline(warpVals([2,4]),'LineWidth',2,'alpha',1);
-ylim([4 50]); yticks(freqs(find(ismember(freqs, [4 8 13 30 55]))))
+ylim([4 50]); yticks(f(find(ismember(f, [4 8 13 30 50]))))
 xticklabels({'RHS','LTO','LHS','RTO','RHS'});xtickangle(30);
 xlabel('Gait Cycle')
 yline(13,'--k',LineWidth=2)
@@ -404,7 +491,7 @@ set(gca, 'ydir', 'normal'); ylabel('Frequencies (Hz)','FontSize',18);
 xlim([0 warpVals(end)]); xticks(warpVals);
 xline(warpVals([1,3,5]),'LineWidth',2,'alpha',1);
 xline(warpVals([2,4]),'LineWidth',2,'alpha',1);
-ylim([4 50]); yticks(freqs(find(ismember(freqs, [4 8 13 30 55]))))
+ylim([4 50]); yticks(f(find(ismember(f, [4 8 13 30 50]))))
 xticklabels({'RHS','LTO','LHS','RTO','RHS'});xtickangle(30);
 xlabel('Gait Cycle')
 yline(13,'--k',LineWidth=2)
@@ -487,9 +574,9 @@ exportgraphics(gcf, figName, 'Resolution', 500);
 close all
 
 %% run sorting loop
-subFiles = dir(fullfile(path,'sub*'));
+subFiles = dir(fullfile(workingDir,'sub*'));
 delete(gcp('nocreate'))
-parpool("Processes",8)
+parpool("Processes",7)
 parfor sub = 1:length(subFiles)
 
     % load EEG
@@ -551,13 +638,14 @@ parfor sub = 1:length(subFiles)
 
         T(sub).LSM_ic_number            = idx_select;
         T(sub).LSM_distance_from_roi    = pdist2(ERSP.dipfit.model(idx_select).posxyz,LSM_roi);
+        T(sub).LSM_cluster_median_distance_from_roi = clusterMedianDist(ERSP.dipfit,idx_select,LSM_roi);
 
         if isfield(ERSP,'removedTrialNum')
             T(sub).LSM_cycles_removed           = ERSP.removedTrialNum{idx_select};
             T(sub).LSM_cycles_removed_percentage= ERSP.removedTrialNum{idx_select}/size(ERSP.data,4)*100;
         end
 
-        saveName = fullfile(saveDir,['LSM_' ERSP.subject '.mat']);
+        saveName = fullfile(saveFolder,['LSM_' ERSP.subject '.mat']);
         parsave(saveName,ERSP,idx_select,'LSM')
     end
 
@@ -569,20 +657,21 @@ parfor sub = 1:length(subFiles)
 
         T(sub).RSM_ic_number                = idx_select;
         T(sub).RSM_distance_from_roi        = pdist2(ERSP.dipfit.model(idx_select).posxyz,RSM_roi);
+        T(sub).RSM_cluster_median_distance_from_roi = clusterMedianDist(ERSP.dipfit,idx_select,RSM_roi);
 
         if isfield(ERSP,'removedTrialNum')
             T(sub).RSM_cycles_removed           = ERSP.removedTrialNum{idx_select};
             T(sub).RSM_cycles_removed_percentage= ERSP.removedTrialNum{idx_select}/size(ERSP.data,4)*100;
         end
 
-        saveName = fullfile(saveDir,['RSM_' ERSP.subject '.mat']);
+        saveName = fullfile(saveFolder,['RSM_' ERSP.subject '.mat']);
         parsave(saveName,ERSP,idx_select,'RSM')
     end
 end
 delete(gcp('nocreate'))
 
 %% save to file
-tableName = fullfile(figDir, ['A7_cluster_data_table_' label '.csv']);
+tableName = fullfile(figDir, 'A7_cluster_data_table.csv');
 if exist(tableName, 'file') == 2
     delete(tableName); % Delete the file
     disp('Overwrite previous csv');
@@ -624,11 +713,20 @@ switch roi
 end
 
 if length(min_idx_list) > 1
-    % get the ic with the greatest beta suppression
+    % get the ic with the strongest contra-specific beta suppression
+    % (contralateral minus ipsilateral swing), so a lateralized sensorimotor source
     contra_swing    = squeeze(mean(data(:,f_bound(1):f_bound(2),contra_startIdx:contra_endIdx),2));
-    contra_beta_suppression = sum(contra_swing,2);
-    [~, idx] = min(contra_beta_suppression); % get the greatest beta suppression
+    ips_swing       = squeeze(mean(data(:,f_bound(1):f_bound(2),ips_startIdx:ips_endIdx),2));
+    contra_beta     = mean(contra_swing,2);
+    ips_beta        = mean(ips_swing,2);
+    lat_suppression = contra_beta - ips_beta; % more negative = stronger contra suppression
+    
+    [~, idx] = min(lat_suppression);
 
+    % contra_swing    = squeeze(mean(data(:,f_bound(1):f_bound(2),contra_startIdx:contra_endIdx),2));
+    % contra_beta_suppression = sum(contra_swing,2);
+    % [~, idx] = min(contra_beta_suppression); % get the greatest beta suppression
+    %
     % beta_power = squeeze(mean(data(:,f_bound(1):f_bound(2),:),2));
     % total_abs_beta_power = sum(abs(beta_power),2);
     % [~, idx] = min(contra_beta_suppression./total_abs_beta_power); % get the most relative beta suppression
@@ -665,7 +763,7 @@ save(filename,'tfdata','-v7.3','-nocompression')
 end
 
 function [min_idx_list_LSM, min_idx_list_RSM] = checkShared(ERSP,shared_ic,min_idx_list_LSM,min_idx_list_RSM)
-%%% if the IC is both clusters, keep the IC that is closest to the ROI
+%%% if the IC is in both clusters, assign it to the hemisphere contralateral to the swing with stronger beta suppression
 
 for i = 1:length(ERSP.tfdata)
     ersp = ERSP.tfdata(i).ersp_selfBase_pChange_mean;
@@ -699,4 +797,17 @@ for sh = 1:length(shared_ic)
     end
 end
 
+end
+
+function d = clusterMedianDist(dipfit,ic,roi)
+%%% Euclidean distance from the cluster's median per-run dipole position to
+% an ROI. Falls back to the centrotype position when no per-run cloud exists.
+if isfield(dipfit,'cltr') && ~isempty(dipfit.cltr(ic).pos_runs)
+    runs = dipfit.cltr(ic).pos_runs;
+    runs = runs(all(~isnan(runs),2),:);   % drop runs without this IC
+    medianXYZ = median(runs,1);
+else
+    medianXYZ = dipfit.model(ic).posxyz;
+end
+d = pdist2(medianXYZ,roi);
 end

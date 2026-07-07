@@ -8,7 +8,7 @@
 clear all; clc;
 eeglab; close all;
 if ispc
-    mainDir     = 'C:\Git\DoD-Gait';
+    mainDir = 'C:\clab\DoD-Gait';
 else
     mainDir = '/Users/Leo/Git/DoD-Gait';
 end
@@ -21,7 +21,7 @@ end
 %path = uigetdir(dataDir);
 %label = extractAfter(path,'selected_');
 
-path = fullfile(dataDir,'07_selected_withStanding_run1only_moreAffected');
+path = fullfile(dataDir,'07_selected');
 clusterLabel = {'RSM' 'LSM'};
 
 %% get mask
@@ -34,9 +34,9 @@ end
 for clu = 1:length(clusterLabel)
     Files = dir(fullfile(path,[clusterLabel{clu} '*']));
     if exist(p_maskfile, 'file') && strcmp(clusterLabel{clu}, 'RSM')
-        p_mask = rsm_mask;
+        p_mask = double(rsm_mask);
     elseif exist(p_maskfile, 'file') && strcmp(clusterLabel{clu}, 'LSM')
-        p_mask = lsm_mask;
+        p_mask = double(lsm_mask);
     else
         p_mask = [];
     end

@@ -16,7 +16,7 @@ library(openxlsx)
 library(rmarkdown)
 
 ## set up paths
-currentDir <- "E:/clab/DoD-Gait/results" # <-- Change this to your local path
+currentDir <- "C:/clab/DoD-Gait/results" # <-- Change this to your local path
 
 dataDir <- file.path(currentDir, "processed_data")
 outputDir <- file.path(currentDir, "output")

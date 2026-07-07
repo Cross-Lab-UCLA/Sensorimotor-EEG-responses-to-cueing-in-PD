@@ -20,11 +20,12 @@ library(scales)
 
 
 # Set paths
-currentDir <- "E:/clab/DoD-Gait/results" # <-- Change this to your local path
-
+currentDir <- "C:/clab/DoD-Gait/results" # <-- Change this to your local path
 dataDir <- file.path(currentDir, "processed_data")
 outputDir <- file.path(currentDir, "output")
-funcDir <- file.path(currentDir,"a1_statistics_pipeline","func")
+
+codeDir <- "E:/clab/Sensorimotor-EEG-responses-to-cueing-in-PD/code/02_statistics_pipeline"
+funcDir <- file.path(codeDir,"func")
 
 # load in functions
 source(file.path(funcDir, "club_contrast.r"))
@@ -257,7 +258,7 @@ plot_int <- function(filename, dv, cue_pval) {
       ),
       xmin = xmin + shift,
       xmax = xmax + shift,
-      y = 5 + seq_along(xmin)
+      y = 4 + seq_along(xmin)*1.8
     )
 
   if (nrow(sig_contrasts1) > 0) {
@@ -272,7 +273,7 @@ plot_int <- function(filename, dv, cue_pval) {
     ) + geom_signif(
       data = ann_uncorrected,
       aes(xmin = xmin, xmax = xmax, annotations = signif, y_position = y, group = Est),
-      manual = TRUE, inherit.aes = FALSE, tip_length = 0.03, textsize = 6.5, vjust = 0.1,
+      manual = TRUE, inherit.aes = FALSE, tip_length = 0.03, textsize = 6.5, vjust = 0.15,
       color = "grey10"
     )
   }
@@ -333,7 +334,7 @@ p_less <- plots_box$lessAffected + coord_cartesian(xlim = c(0.5, 2.5), ylim = yl
   ) + geom_hline(yintercept = 0, linetype = "dashed", alpha = 0.5, linewidth = 1)
 
 # set up int plots
-ylim_vals <- c(-12, 12)
+ylim_vals <- c(-15, 15)
 p2_lsm <- plots_int$LSM + coord_cartesian(xlim = c(0.5, 3.5), ylim = ylim_vals, expand = FALSE) +
   scale_y_continuous(breaks = seq(ylim_vals[1], ylim_vals[2], length.out = 5)) +
   theme(

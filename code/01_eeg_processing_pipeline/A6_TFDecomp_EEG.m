@@ -16,16 +16,16 @@
 %%
 clear all; 
 if ispc
-    mainDir     = 'C:\Git\DoD-Gait';
+    mainDir = 'C:\clab\DoD-Gait';
 elseif ismac
     mainDir = '/Users/Leo/Git/DoD-Gait';
 else
-    mainDir    = '/home/leo/Documents/DoD-Gait';
+    mainDir = '/home/leo/Documents/DoD-Gait';
 end
 
 % load in libraries
-funcpath   = fullfile(mainDir,'code','func');
-addpath(funcpath)
+funcPath    = fullfile(mainDir,'code','01_eeg_processing_pipeline','func');
+addpath(funcPath)
 eeglab;
 ft_defaults;
 clc; close all
@@ -36,20 +36,24 @@ figDir      = fullfile(mainDir,'reports','data_quality');
 
 % prompt user for folder
 disp('Load in 05_epoched folder.')
-path = uigetdir(dataDir,'Load in 05_epoched folder.'); % select folder containing epoched dataset
-label = extractAfter(path,'epoched_');
-saveSubjFolder = fullfile(dataDir,['06_ERSP_' label]); % set up folder for saving time-frequency data
-mkdir(saveSubjFolder)
-load(fullfile(path,'warpVals.mat'));
+workingDir = uigetdir(dataDir,'Load in 05_epoched folder.'); % select folder containing epoched dataset
+
+[~, folderName] = fileparts(workingDir);
+label       = extractAfter(workingDir,'epoched_');
+saveFolder = fullfile(mainDir, 'data', ['06_ERSP', repmat(['_' label], 1, ~isempty(label))]);
+mkdir(saveFolder);
+
+% load in warpVals
+load(fullfile(workingDir,'warpVals.mat'));
 
 % get files
-files = dir(fullfile(path,'*.set'));
+files = dir(fullfile(workingDir,'*.set'));
 %% run newtimef
 % open parallel processing
 cy = [2 0.5];
 EEG = [];
 delete(gcp("nocreate"));
-parpool("Processes",7)
+parpool("Processes",6)
 
 % run loop for ersp extraction
 parfor s = 1:length(files)
@@ -81,18 +85,15 @@ parfor s = 1:length(files)
 
     % perform jointprob to remove outliers
     REJ = 3; % threshold for jointprob
-    % check outliers for both channels and ICs
-    [~, ~, ~, ~, removedIdx1] = pop_jointprobLM(EEG,1,1:size(EEG.data,1),REJ,REJ,1,1);
-    [~, ~, ~, ~, removedIdx2] = pop_jointprobLM(EEG,0,1:size(EEG.icaact,1),REJ,REJ,1,1);
+    % check outliers from ICs
+    [~, ~, ~, ~, removedIdx] = pop_jointprobLM(EEG,0,1:size(EEG.icaact,1),REJ,REJ,1,1);
     
-    removedIdx = unique([find(removedIdx1) find(removedIdx2)]);
-
     ERSP.HS_idx.removed4TF  = gc_kept(removedIdx);
     ERSP.HS_idx.kept4TF     = gc_kept;
     ERSP.HS_idx.kept4TF(removedIdx) = [];
 
     % removed bad epochs 
-    EEG = pop_select(EEG, 'notrial', removedIdx);
+    EEG = pop_select(EEG, 'notrial', find(removedIdx));
     EEG = eeg_checkset(EEG);
     EEG.etc.gait_events_idx(removedIdx,:) = [];
     EEG.etc.gait_table(removedIdx,:) =[];
@@ -159,7 +160,7 @@ parfor s = 1:length(files)
     % save EEG struct to file
     filename = [ERSP.subject '_ersp_gait.mat'];
     fprintf('Saving subject %s\n', ERSP.subject);    
-    parsaveERSP(fullfile(saveSubjFolder,filename),ERSP)
+    parsaveERSP(fullfile(saveFolder,filename),ERSP)
     fprintf('Finished subject %s\n', ERSP.subject);
 end
 

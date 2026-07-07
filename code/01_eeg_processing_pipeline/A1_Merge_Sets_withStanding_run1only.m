@@ -5,7 +5,7 @@
 %   Applies filtering, downsampling, and event adjustments for PD subjects 
 %   (more/less affected side).
 %
-%   1. Prompts user to select subjects for analysis.
+% %   1. Prompts user to select subjects for analysis.
 %   2. Loads and processes walk, walkAuditory, and walkVisual conditions 
 %       for each subject. Filter, downsample, remove line noise and 
 %       remove high rms chans.
@@ -22,14 +22,15 @@
 %%
 clear all; clc; close all;
 if ispc
-    mainDir     = 'C:\Git\DoD-Gait';
+    mainDir = 'C:\clab\DoD-Gait';
 elseif ismac
     mainDir = '/Users/Leo/Git/DoD-Gait';
 else
     mainDir = '/home/leo/Documents/DoD-Gait';
 end
 
-addpath(fullfile(mainDir,'code','func'))
+funcPath    = fullfile(mainDir,'code','01_eeg_processing_pipeline','func');
+addpath(funcPath);
 figDir  = fullfile(mainDir,'reports','data_quality');
 mkdir(figDir);
 chanDir     = fullfile(figDir,'channelRemovedPlots');

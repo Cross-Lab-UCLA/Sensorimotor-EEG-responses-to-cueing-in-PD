@@ -38,11 +38,10 @@ EEG = pop_resample(EEG, 256);
 
 % remove channels that is 3 std above the mean rms of the channel
 rms_c = rms(EEG.data');
-median_c = median(rms_c);
 mean_c = mean(rms_c);
 std_c = std(rms_c);
-lower_bound = median_c - 3 * std_c;
-upper_bound = median_c + 3 * std_c;
+lower_bound = mean_c - 3 * std_c;
+upper_bound = mean_c + 3 * std_c;
 outRMS_chan = find(rms_c < lower_bound | rms_c > upper_bound);
 rms_removed_ch = []; %tracker for RMS channel removal
 channelRemoved1_num = [];

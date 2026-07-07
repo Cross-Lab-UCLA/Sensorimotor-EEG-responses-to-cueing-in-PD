@@ -16,18 +16,19 @@
 % Outputs:
 %   - AMICA-processed EEG datasets with ICA weights
 %
-% LM 122325
+% LM 061726
 %% set up folders
 clear all; clc;
 eeglab; close all;
 if ispc
-    mainDir = 'E:\clab\DoD-Gait';
+    mainDir = 'C:\clab\DoD-Gait';
 elseif ismac
     mainDir = '/Users/Leo/Git/DoD-Gait';
 else
     mainDir = '/home/leo/Documents/DoD-Gait';
 end
-addpath(fullfile(mainDir,'code','func'))
+funcPath    = fullfile(mainDir,'code','01_eeg_processing_pipeline','func');
+addpath(funcPath);
 disp('Load in 01_combined folder.')
 workDir = uigetdir(fullfile(mainDir,'data'),'Load in 01_combined folder.');
 label       = extractAfter(workDir,'combined_');
@@ -64,13 +65,15 @@ for re = 1:20
         keepLoop = true;
         REJ = 3; % starting jointprob threshold
         EEGtmp2 = eeg_regepochs(EEGtmp,1);
+        % real start sample in EEGtmp of each kept epoch (eeg_regepochs drops epochs that contains boundaries)
+        isStart    = strcmp({EEGtmp2.event.type},'X') & mod([EEGtmp2.event.latency]-1, EEGtmp2.pnts) == 0;
+        epochStart = [EEGtmp2.urevent([EEGtmp2.event(isStart).urevent]).latency];
         while keepLoop
-            [EEGtmp2_tmp, ~, ~, nrej, rej, com] = pop_jointprobLM(EEGtmp2,1,1:size(EEGtmp2.data,1),REJ,REJ,1,1);
-            EEGtmp2_tmp = eeg_epoch2continuous(EEGtmp2_tmp);
+            [~, ~, ~, ~, rej] = pop_jointprobLM(EEGtmp2,1,1:size(EEGtmp2.data,1),REJ,REJ,1,1);
 
-            %check
-            pnts_removed_jointProb  = EEGtmp.pnts - EEGtmp2_tmp.pnts;
-            dur_left = EEGtmp2_tmp.pnts/EEGtmp2_tmp.srate/60;
+            %check (count only rejected epochs; data not covered by the 1 s epochs was never screened)
+            pnts_removed_jointProb  = sum(rej)*EEGtmp2.pnts;
+            dur_left = (EEGtmp.pnts - pnts_removed_jointProb)/EEGtmp.srate/60;
 
             if dur_left < min_dur % if more than 90% of gait cycle removed
 
@@ -89,14 +92,13 @@ for re = 1:20
             else
                 keepLoop = false;
                 epoched_rej = find(rej);
-                rm_bounds_jointProb = [epoched_rej*EEG.srate; (epoched_rej*EEG.srate) + (EEG.srate - 1)]';
+                rm_bounds_jointProb = [epochStart(epoched_rej); epochStart(epoched_rej) + EEGtmp.srate - 1]';
                 sample_mask_jointProb = ones(1,EEGtmp.pnts);
                 for x = 1:size(rm_bounds_jointProb,1)
                     sample_mask_jointProb(rm_bounds_jointProb(x,1):rm_bounds_jointProb(x,2)) = 0;
                 end
                 EEG.etc.jointprob_threshold = REJ;
                 EEGtmp2 = [];
-                EEGtmp2_tmp = [];
             end
         end
 
@@ -154,7 +156,7 @@ for re = 1:20
         EEGtmp = pop_interp(EEGtmp, bad_chans, 'spherical'); % interpolate
         EEGtmp.nbchan = EEGtmp.nbchan+1;
         EEGtmp.data(end+1,:) = zeros(1, EEGtmp.pnts);
-        EEGtmp.chanlocs(1,EEG.nbchan) = EEGtmp.chaninfo.removedchans(strcmp({EEGtmp.chaninfo.removedchans.type},'REF')); % add back ref channel
+        EEGtmp.chanlocs(1,EEGtmp.nbchan) = EEGtmp.chaninfo.removedchans(strcmp({EEGtmp.chaninfo.removedchans.type},'REF')); % add back ref channel
         EEGtmp = pop_reref(EEGtmp, []);  % reference to average
         EEGtmp = eeg_checkset(EEGtmp);
 
@@ -217,19 +219,15 @@ end
 
 %% functions
 function gc_idx = checkGC(EEG)
+% For recording keeping. Cycles next to turns are dropped (epoch window crosses the turn boundary cut), so this
+% undercounts cycles vs. A5, which epochs the full data with turns intact.
 
 event_str = unique({EEG.event.type}); % get gait event labels
-% find all events with HS1 in it
-if contains(EEG.filepath,'affected','IgnoreCase',true)
-    disp('Affected side labels detected, using affected side labels for epoching.')
-    HS1_str = event_str(~cellfun('isempty', regexp(event_str, '^MoreAffected_.*_HS.*$')));
-    HS1_str(contains(HS1_str,'HS2')) = [];
-else
-    HS1_str = event_str(contains(event_str,'HS1'));
-end
+% lock on R_HS1 for every subject, same as A5 epoching
+HS1_str = event_str(contains(event_str,'R_HS1'));
 
 % epoch data
-EEG = pop_epoch(EEG,HS1_str, [-1  2], 'epochinfo', 'yes'); % epoch from -1 to 3
+EEG = pop_epoch(EEG,HS1_str, [-1  2], 'epochinfo', 'yes'); % epoch from -1 to 2
 
 gc_idx = NaN(1, length(EEG.epoch));
 % check if the epoch has a HS2

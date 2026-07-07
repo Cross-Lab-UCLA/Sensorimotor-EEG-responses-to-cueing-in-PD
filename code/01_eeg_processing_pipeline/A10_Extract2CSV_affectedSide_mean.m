@@ -8,7 +8,7 @@
 
 clear all; clc; close all;
 if ispc
-    mainDir     = 'C:\Git\DoD-Gait';
+    mainDir = 'C:\clab\DoD-Gait';
 else
     mainDir = '/Users/Leo/Git/DoD-Gait';
 end
@@ -18,8 +18,8 @@ saveDir = fullfile(mainDir,'results','processed_data');
 % get tables
 path = fullfile(mainDir,'results','processed_data');
 
-RSM = readtable(fullfile(path,['RSM_erspData.csv']));
-LSM = readtable(fullfile(path,['LSM_erspData.csv']));
+RSM = readtable(fullfile(path,'RSM_erspData.csv'));
+LSM = readtable(fullfile(path,'LSM_erspData.csv'));
 affectedside = readtable(fullfile(dataDir,'affected_side.csv'));
 
 T_more = table();

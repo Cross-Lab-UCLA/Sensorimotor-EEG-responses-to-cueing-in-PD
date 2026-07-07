@@ -19,11 +19,12 @@ library(patchwork)
 library(scales)
 
 # Set paths
-currentDir <- "E:/clab/DoD-Gait/results" # <-- Change this to your local path
-
+currentDir <- "C:/clab/DoD-Gait/results" # <-- Change this to your local path
 dataDir <- file.path(currentDir, "processed_data")
 outputDir <- file.path(currentDir, "output")
-funcDir <- file.path(currentDir,"a1_statistics_pipeline","func")
+
+codeDir <- "E:/clab/Sensorimotor-EEG-responses-to-cueing-in-PD/code/02_statistics_pipeline"
+funcDir <- file.path(codeDir,"func")
 
 # load in functions
 source(file.path(currentDir, "club_contrast.r"))

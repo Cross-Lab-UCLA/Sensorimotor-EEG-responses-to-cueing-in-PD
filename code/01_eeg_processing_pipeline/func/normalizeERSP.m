@@ -21,7 +21,7 @@ if isempty(idx_visu)
 end
 
 tf = ERSP.data.*conj(ERSP.data);
-tf_mean = squeeze(mean(tf,4,"omitnan"));
+tf_mean = mean(tf,4,"omitnan");
 
 for idx_select = 1:size(ERSP.data,1)
 

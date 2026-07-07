@@ -10,17 +10,17 @@
 %
 % LM 122225
 %%
-clear all; clc; close all; warning('off','all');
+clear all; clc; eeglab; close all; warning('off','all');
 if ispc
-    mainDir     = 'C:\Git\DoD-Gait';
+    mainDir    = 'C:\clab\DoD-Gait';
 else
     mainDir    = '/home/leo/Documents/DoD-Gait';
 end
-funcpath    = fullfile(mainDir,'code','func');
-addpath(funcpath)
+funcPath    = fullfile(mainDir,'code','01_eeg_processing_pipeline','func');
+addpath(funcPath)
 disp('Load in 04_dipRemoved folder.')
 figDir      = fullfile(mainDir,'reports','data_quality');
-workDir     = uigetdir(fullfile(mainDir,'data'),'Load in 04_dipRemoved folder.');
+workingDir     = uigetdir(fullfile(mainDir,'data'),'Load in 04_dipRemoved folder.');
 
 %%
 % loop = true;
@@ -44,10 +44,11 @@ workDir     = uigetdir(fullfile(mainDir,'data'),'Load in 04_dipRemoved folder.')
 % end
 
 PerformAffectedSide = false;
-label       = extractAfter(workDir,'dipRemoved_');
-saveFolder =  fullfile(mainDir,'data',['05_epoched_' label]);
+[~, folderName] = fileparts(workingDir);
+label       = extractAfter(workingDir,'dipRemoved_');
+saveFolder = fullfile(mainDir, 'data', ['05_epoched', repmat(['_' label], 1, ~isempty(label))]);
 mkdir(saveFolder);
-eegFiles    = dir(fullfile(workDir,'*.set'));
+eegFiles    = dir(fullfile(workingDir,'*.set'));
 
 %% loop to get time warp values
 disp('Calclating time warping values')
@@ -134,7 +135,7 @@ save(fullfile(saveFolder,'warpVals.mat'),"warpVals");
 
 % save table
 T = struct2table(T);
-writetable(T,fullfile(figDir,['A5_Epoch_' label '.xlsx']));
+writetable(T,fullfile(figDir,'A5_Epoch.xlsx'));
 
 %%  Functions
 function [EEG, gait_events_all, gait_table] = getGaitTable(EEG,gait_events_all,sub,removeOutliers)

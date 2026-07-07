@@ -100,11 +100,11 @@ if plotstuff ==1
             'fontsize', 8)
         xlabel('Frequency (Hz)', 'fontsize',12)
         ylabel('Frequency (Hz)', 'fontsize', 12)
-        title(['**IC' int2str(IC),'**'],'Color','r','fontsize',16)
+        title(['**IC' int2str(badPPC_IC(IC)),'**'],'Color','r','fontsize',16)
     end
     
     set(gcf, 'Units', 'Normalized', 'OuterPosition', [0 0 1 1]);
-    saveName = fullfile(saveFolder,[strcat(EEG.subject,'_BadSpectralCovariance_',num2str(IC-1)) '.jpg']);
+    saveName = fullfile(saveFolder,[EEG.subject '_BadSpectralCovariance.jpg']);
     saveas(gcf,saveName);
 
 end

@@ -2,22 +2,22 @@
 % This script perform group level statistical analysis of the ersp roi 
 % and make the ERSP plot for manuscript
 %
-% LM 122325
+% LM 093026
 %%
 clear all; clc; close all
 rng(134);
 if ispc
-    mainDir     = 'E:\clab\DoD-Gait';
+    mainDir     = 'C:\clab\DoD-Gait';
 else
-    mainDir = '/Users/Leo/Git/DOD-Gait';
+    mainDir = '/Users/Leo/Git/DOD_Gait';
 end
-addpath(fullfile(mainDir,'code'));
-addpath(fullfile(mainDir,'code','func'));
+funcPath    = fullfile(mainDir,'code','01_eeg_processing_pipeline','func');
+addpath(funcPath)
 eeglab;
 ft_defaults; close all;
 
-dataFolder = fullfile(mainDir,'data','07_selected_withStanding_run1only_moreAffected');
-figFolder = fullfile(mainDir,'reports','results');
+dataFolder = fullfile(mainDir,'data','07_selected');
+figFolder = fullfile(mainDir,'results','figures');
 
 %%
 rsm_ersp_selfBase_pChange_mean = [];
@@ -77,38 +77,47 @@ end
 % pvals = std_stat({lsm_ersp_selfBase_pChange_mean; zeros(size(lsm_ersp_selfBase_pChange_mean))}, ...
 %     'mode', 'fieldtrip', 'fieldtripmethod', 'montecarlo', 'condstats', 'on', 'fieldtripmcorrect', 'cluster');
 
-[stats,df,pvals]= statcondfieldtrip({lsm_ersp_selfBase_pChange_mean; zeros(size(lsm_ersp_selfBase_pChange_mean))},...
+lsmStat = statcondfieldtrip({lsm_ersp_selfBase_pChange_mean; zeros(size(lsm_ersp_selfBase_pChange_mean))},...
     'paired','on',...
     'method','permutation',...
     'naccu', 2000,...
     'alpha', 0.05,...
-    'mcorrect','cluster');
+    'mcorrect','cluster',...
+    'structoutput','on');
 
-% [stats,df,pvals]= statcondfieldtrip({lsm_ersp_allBase_pChange_mean; zeros(size(lsm_ersp_allBase_pChange_mean))},...
+% lsmStat = statcondfieldtrip({lsm_ersp_allBase_pChange_mean; zeros(size(lsm_ersp_allBase_pChange_mean))},...
 %     'paired','on',...
 %     'method','permutation',...
 %     'naccu', 1000,...
 %     'alpha', 0.05,...
-%     'mcorrect','cluster');
+%     'mcorrect','cluster',...
+%     'structoutput','on');
 
-[lsm_t_values, lsm_mask] = apply_significance_mask(pvals, stats);
+% statcondfieldtrip forces correcttail='alpha', so .mask uses alpha/2 per tail
+lsm_mask     = lsmStat.mask;
+lsm_t_values = lsmStat.t;
+lsm_t_values(~lsm_mask) = NaN;
 
 
-[stats,df,pvals]= statcondfieldtrip({rsm_ersp_selfBase_pChange_mean; zeros(size(rsm_ersp_selfBase_pChange_mean))},...
+rsmStat = statcondfieldtrip({rsm_ersp_selfBase_pChange_mean; zeros(size(rsm_ersp_selfBase_pChange_mean))},...
     'paired','on',...
     'method','permutation',...
     'naccu', 2000,...
     'alpha', 0.05,...
-    'mcorrect','cluster');
+    'mcorrect','cluster',...
+    'structoutput','on');
 
-% [stats,df,pvals]= statcondfieldtrip({rsm_ersp_allBase_pChange_mean; zeros(size(rsm_ersp_allBase_pChange_mean))},...
+% rsmStat = statcondfieldtrip({rsm_ersp_allBase_pChange_mean; zeros(size(rsm_ersp_allBase_pChange_mean))},...
 %     'paired','on',...
 %     'method','permutation',...
 %     'naccu', 1000,...
 %     'alpha', 0.05,...
-%     'mcorrect','cluster');
+%     'mcorrect','cluster',...
+%     'structoutput','on');
 
-[rsm_t_values, rsm_mask] = apply_significance_mask(pvals, stats);
+rsm_mask     = rsmStat.mask;
+rsm_t_values = rsmStat.t;
+rsm_t_values(~rsm_mask) = NaN;
 
 saveName = fullfile(mainDir,'data',"study_p-masks.mat");
 save(saveName,"rsm_mask","lsm_mask");
@@ -221,7 +230,7 @@ saveas(gcf,fullfile(figFolder,filename));
 lsm_t_pos = lsm_t_values;
 lsm_t_pos(lsm_t_values <= 0) = nan;
 lsm_t_neg = lsm_t_values;
-lsm_t_neg(lsm_t_values >= 0) = nan;,
+lsm_t_neg(lsm_t_values >= 0) = nan;
 lsm_sum_pos = sum(lsm_t_pos, 'all', 'omitnan');
 lsm_sum_neg = sum(lsm_t_neg, 'all', 'omitnan');
 
@@ -229,11 +238,11 @@ figure
 t2 = tiledlayout(2,2,'TileSpacing','Compact');
 
 nexttile;
-contourf(tfdata(1).times./1000, tfdata(1).freqs, lsm_t_pos, 40, 'linecolor', 'none'); 
+contourf(tfdata(1).times./1000, tfdata(1).freqs, lsm_t_pos, 30, 'linecolor', 'none'); 
 colormap(gca, 'hot');
 title(sprintf('LSM Positive Clusters (\\SigmaT = %.2f)', lsm_sum_pos));
 nexttile;
-contourf(tfdata(1).times./1000, tfdata(1).freqs, lsm_t_neg, 40, 'linecolor', 'none'); 
+contourf(tfdata(1).times./1000, tfdata(1).freqs, lsm_t_neg, 30, 'linecolor', 'none'); 
 colormap(gca, 'abyss');
 title(sprintf('LSM Negative Clusters (\\SigmaT = %.2f)', lsm_sum_neg));
 
@@ -241,16 +250,16 @@ title(sprintf('LSM Negative Clusters (\\SigmaT = %.2f)', lsm_sum_neg));
 rsm_t_pos = rsm_t_values;
 rsm_t_pos(rsm_t_values <= 0) = nan;
 rsm_t_neg = rsm_t_values;
-rsm_t_neg(rsm_t_values >= 0) = nan;,
+rsm_t_neg(rsm_t_values >= 0) = nan;
 rsm_sum_pos = sum(rsm_t_pos, 'all', 'omitnan');
 rsm_sum_neg = sum(rsm_t_neg, 'all', 'omitnan');
 
 nexttile;
-contourf(tfdata(1).times./1000, tfdata(1).freqs, rsm_t_pos, 40, 'linecolor', 'none'); 
+contourf(tfdata(1).times./1000, tfdata(1).freqs, rsm_t_pos, 30, 'linecolor', 'none'); 
 colormap(gca, 'hot');
 title(sprintf('RSM Positive Clusters (\\SigmaT = %.2f)', rsm_sum_pos));
 nexttile;
-contourf(tfdata(1).times./1000, tfdata(1).freqs, rsm_t_neg, 40, 'linecolor', 'none'); 
+contourf(tfdata(1).times./1000, tfdata(1).freqs, rsm_t_neg, 30, 'linecolor', 'none'); 
 colormap(gca, 'abyss');
 title(sprintf('RSM Negative Clusters (\\SigmaT = %.2f)', rsm_sum_neg));
 
